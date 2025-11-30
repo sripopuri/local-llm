@@ -5,6 +5,7 @@ A Python module to interact with locally hosted LLM via LM Studio API
 
 import requests
 import json
+import re
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
@@ -43,6 +44,27 @@ class LMStudioClient:
         except Exception as e:
             print(f"✗ Error connecting to LM Studio API: {e}")
             return False
+
+    def _sanitize_text(self, text: str) -> str:
+        """
+        Remove model "thinking" sections (e.g. <think>...</think>) from output.
+
+        This keeps only the user-facing content.
+        """
+        if not text:
+            return text
+
+        # Remove any <think>...</think> blocks (multiline)
+        cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.S | re.I)
+
+        # Remove any stray <think/> or closing tags
+        cleaned = re.sub(r"</?think\s*/?>", "", cleaned, flags=re.I)
+
+        # Collapse excessive whitespace
+        cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+
+        return cleaned.strip()
     
     def get_available_models(self) -> List[Dict[str, Any]]:
         """Get list of available models"""
@@ -214,22 +236,16 @@ def main():
         # Example 1: Simple chat completion
         print("\n--- Chat Completion Example ---")
         messages = [
-            Message(role="system", content="You are a helpful assistant."),
+            Message(role="system", content="You are a helpful assistant, (Answer in a brief paragraph)."),
             Message(role="user", content="How many states are there in the US?")
         ]
         
         response = client.chat_completion(messages, max_tokens=500)
         
         if response and "choices" in response:
-            print(f"Assistant: {response['choices'][0]['message']['content']}")
-        
-        # # Example 2: Text completion
-        # print("\n--- Text Completion Example ---")
-        # prompt = "The future of AI is"
-        # response = client.completion(prompt, max_tokens=50)
-        
-        # if response and "choices" in response:
-        #     print(f"Completion: {response['choices'][0]['text']}")
+            raw = response['choices'][0].get('message', {}).get('content') or response['choices'][0].get('text', '')
+            cleaned = client._sanitize_text(raw)
+            print(f"Assistant: {cleaned}")
 
 
 if __name__ == "__main__":
