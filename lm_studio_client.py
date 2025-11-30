@@ -6,6 +6,8 @@ A Python module to interact with locally hosted LLM via LM Studio API
 import requests
 import json
 import re
+import argparse
+import os
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
@@ -15,6 +17,30 @@ class Message:
     """Represents a chat message"""
     role: str  # "user", "assistant", "system"
     content: str
+
+
+def load_system_prompt() -> str:
+    """Load and construct the system prompt from prompts.json file"""
+    prompts_file = os.path.join(os.path.dirname(__file__), "prompts.json")
+    try:
+        with open(prompts_file, 'r') as f:
+            prompts = json.load(f)
+            base_prompt = prompts.get("system_prompt", "You are a helpful assistant.")
+            
+            # Build personality section
+            personality = prompts.get("personality", [])
+            personality_text = "\n".join([f"- {p}" for p in personality])
+            
+            # Build guidelines section
+            guidelines = prompts.get("response_guidelines", [])
+            guidelines_text = "\n".join([f"{i+1}. {g}" for i, g in enumerate(guidelines)])
+            
+            # Combine all sections
+            full_prompt = f"{base_prompt}\n\nPersonality:\n{personality_text}\n\nResponse Guidelines:\n{guidelines_text}"
+            return full_prompt
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"Warning: Could not load prompts.json: {e}")
+        return "You are a helpful assistant."
 
 
 class LMStudioClient:
@@ -221,7 +247,14 @@ class LMStudioClient:
 
 def main():
     """Example usage of the LM Studio client"""
-    
+    parser = argparse.ArgumentParser(description="LM Studio client example runner")
+    parser.add_argument("-p", "--prompt", help="Question or prompt to send to the model")
+    parser.add_argument("-m", "--model", help="Model id to use (overrides auto-selection)")
+    args = parser.parse_args()
+
+    # Determine user question from args or interactive input
+    question = args.prompt or input("Enter your question: ")
+
     # Initialize the client
     client = LMStudioClient()
     
@@ -229,15 +262,16 @@ def main():
     models = client.get_available_models()
     
     if models:
-        # Set the first available model
-        model_id = models[0].get("id")
+        # Set the model: use provided model id or the first available model
+        model_id = args.model or models[0].get("id")
         client.set_model(model_id)
         
         # Example 1: Simple chat completion
         print("\n--- Chat Completion Example ---")
+        system_prompt = load_system_prompt()
         messages = [
-            Message(role="system", content="You are a helpful assistant, (Answer in a brief paragraph)."),
-            Message(role="user", content="How many states are there in the US?")
+            Message(role="system", content=system_prompt),
+            Message(role="user", content=question)
         ]
         
         response = client.chat_completion(messages, max_tokens=500)
